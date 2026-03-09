@@ -1,0 +1,81 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v-prod') && 'Production' || 'Development' }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/github-actions-role
+          aws-region: us-east-1
+
+      - name: Get version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package receiver
+        run: |
+          mkdir build-receiver
+          cd lambdas/receiver
+          pip install -r requirements.txt -t ../../build-receiver/
+          cp lambda_function.py ../../build-receiver/
+          cd ../../build-receiver
+          zip -r ../receiver.zip .
+
+      - name: Package processor
+        run: |
+          mkdir build-processor
+          cd lambdas/processor
+          pip install -r requirements.txt -t ../../build-processor/
+          cp lambda_function.py ../../build-processor/
+          cd ../../build-processor
+          zip -r ../processor.zip .
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp receiver.zip s3://${{ secrets.LAMBDA_BUCKET }}/webhook-receiver-${{ steps.version.outputs.tag }}.zip
+          aws s3 cp processor.zip s3://${{ secrets.LAMBDA_BUCKET }}/webhook-processor-${{ steps.version.outputs.tag }}.zip
+
+      - name: Deploy stack
+        run: |
+          ENV=$(echo "${{ steps.version.outputs.tag }}" | grep -o 'dev\|staging\|prod' || echo 'dev')
+          STACK_NAME="webhook-${ENV}"
+          
+          if aws cloudformation describe-stacks --stack-name $STACK_NAME 2>/dev/null; then
+            aws cloudformation update-stack \
+              --stack-name $STACK_NAME \
+              --template-body file://cloudformation/template.yaml \
+              --parameters \
+                ParameterKey=Env,ParameterValue=$ENV \
+                ParameterKey=LambdaCodeBucket,ParameterValue=${{ secrets.LAMBDA_BUCKET }} \
+                ParameterKey=ReceiverCodeKey,ParameterValue=webhook-receiver-${{ steps.version.outputs.tag }}.zip \
+                ParameterKey=ProcessorCodeKey,ParameterValue=webhook-processor-${{ steps.version.outputs.tag }}.zip \
+              --capabilities CAPABILITY_NAMED_IAM
+            aws cloudformation wait stack-update-complete --stack-name $STACK_NAME
+          else
+            aws cloudformation create-stack \
+              --stack-name $STACK_NAME \
+              --template-body file://cloudformation/template.yaml \
+              --parameters \
+                ParameterKey=Env,ParameterValue=$ENV \
+                ParameterKey=LambdaCodeBucket,ParameterValue=${{ secrets.LAMBDA_BUCKET }} \
+                ParameterKey=ReceiverCodeKey,ParameterValue=webhook-receiver-${{ steps.version.outputs.tag }}.zip \
+                ParameterKey=ProcessorCodeKey,ParameterValue=webhook-processor-${{ steps.version.outputs.tag }}.zip \
+              --capabilities CAPABILITY_NAMED_IAM
+            aws cloudformation wait stack-create-complete --stack-name $STACK_NAME
+          fi
+
+          echo "Stack deployment completed"

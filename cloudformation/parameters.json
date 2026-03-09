@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "Env",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "LambdaCodeBucket",
+    "ParameterValue": "your-bucket-name"
+  },
+  {
+    "ParameterKey": "ReceiverCodeKey",
+    "ParameterValue": "webhook-receiver-v1.0.0.zip"
+  },
+  {
+    "ParameterKey": "ProcessorCodeKey",
+    "ParameterValue": "webhook-processor-v1.0.0.zip"
+  }
+]

@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Webhook Asincrónico - Receiver + Processor + SQS + DynamoDB
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  
+  LambdaCodeBucket:
+    Type: String
+  
+  ReceiverCodeKey:
+    Type: String
+  
+  ProcessorCodeKey:
+    Type: String
+
+Resources:
+  WebhookTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'webhook-${Env}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: webhook_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: N
+      KeySchema:
+        - AttributeName: webhook_id
+          KeyType: HASH
+        - AttributeName: created_at
+          KeyType: RANGE
+
+  ProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'webhook-${Env}-processing'
+      VisibilityTimeout: 60
+      ReceiveMessageWaitTimeSeconds: 20
+
+  ProcessingQueueDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'webhook-${Env}-dlq'
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref ProcessingQueue
+      PolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sqs:*'
+            Resource: !GetAtt ProcessingQueue.Arn
+
+  ReceiverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: receiver-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                Resource: !GetAtt WebhookTable.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ProcessingQueue.Arn
+
+  ProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: processor-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource: !GetAtt WebhookTable.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt ProcessingQueue.Arn
+
+  ReceiverLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'webhook-receiver-${Env}'
+      Runtime: python3.11
+      Role: !GetAtt ReceiverRole.Arn
+      Timeout: 5
+      MemorySize: 256
+      Handler: lambda_function.lambda_handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref ReceiverCodeKey
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WebhookTable
+          QUEUE_URL: !Ref ProcessingQueue
+
+  ProcessorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'webhook-processor-${Env}'
+      Runtime: python3.11
+      Role: !GetAtt ProcessorRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Handler: lambda_function.lambda_handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref ProcessorCodeKey
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WebhookTable
+
+  ProcessorEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt ProcessingQueue.Arn
+      FunctionName: !Ref ProcessorLambda
+      BatchSize: 10
+      BatchWindow: 5
+
+  WebhookAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub 'webhook-${Env}'
+
+  WebhookResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookAPI
+      ParentId: !GetAtt WebhookAPI.RootResourceId
+      PathPart: webhook
+
+  WebhookMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref WebhookAPI
+      ResourceId: !Ref WebhookResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReceiverLambda.Arn}/invocations'
+
+  ReceiverPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ReceiverLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebhookAPI}/*/*'
+
+  APIDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: WebhookMethod
+    Properties:
+      RestApiId: !Ref WebhookAPI
+      StageName: !Ref Env
+
+Outputs:
+  APIEndpoint:
+    Value: !Sub 'https://${WebhookAPI}.execute-api.${AWS::Region}.amazonaws.com/${Env}/webhook'
+  QueueUrl:
+    Value: !Ref ProcessingQueue
+  TableName:
+    Value: !Ref WebhookTable
