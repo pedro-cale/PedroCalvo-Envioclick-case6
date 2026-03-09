@@ -141,7 +141,7 @@ Resources:
       EventSourceArn: !GetAtt ProcessingQueue.Arn
       FunctionName: !Ref ProcessorLambda
       BatchSize: 10
-      BatchWindow: 5
+      MaximumBatchingWindowInSeconds: 5
 
   WebhookAPI:
     Type: AWS::ApiGateway::RestApi
