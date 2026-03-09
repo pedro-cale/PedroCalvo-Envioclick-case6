@@ -20,7 +20,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/github-actions-role
-          aws-region: us-east-1
+          aws-region: us-west-2
 
       - name: Get version
         id: version
