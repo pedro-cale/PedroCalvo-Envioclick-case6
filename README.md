@@ -1,6 +1,6 @@
 # Webhook Asincrónico
 
-Arquitectura minimalista: API Gateway → Lambda Receiver → SQS → Lambda Processor → DynamoDB
+Arquitectura: API Gateway → Lambda Receiver → SQS → Lambda Processor → DynamoDB
 
 ## Estructura
 
