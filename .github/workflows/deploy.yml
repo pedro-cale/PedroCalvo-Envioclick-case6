@@ -46,8 +46,8 @@ jobs:
 
       - name: Upload to S3
         run: |
-          aws s3 cp receiver.zip s3://${{ secrets.LAMBDA_BUCKET }}/webhook-receiver-${{ steps.version.outputs.tag }}.zip
-          aws s3 cp processor.zip s3://${{ secrets.LAMBDA_BUCKET }}/webhook-processor-${{ steps.version.outputs.tag }}.zip
+          aws s3 cp receiver.zip s3://case6-webhook-lambda/webhook-receiver-${{ steps.version.outputs.tag }}.zip
+          aws s3 cp processor.zip s3://case6-webhook-lambda/webhook-processor-${{ steps.version.outputs.tag }}.zip
 
       - name: Deploy stack
         run: |
@@ -60,7 +60,7 @@ jobs:
               --template-body file://cloudformation/template.yaml \
               --parameters \
                 ParameterKey=Env,ParameterValue=$ENV \
-                ParameterKey=LambdaCodeBucket,ParameterValue=${{ secrets.LAMBDA_BUCKET }} \
+                ParameterKey=LambdaCodeBucket,ParameterValue=case6-webhook-lambda \
                 ParameterKey=ReceiverCodeKey,ParameterValue=webhook-receiver-${{ steps.version.outputs.tag }}.zip \
                 ParameterKey=ProcessorCodeKey,ParameterValue=webhook-processor-${{ steps.version.outputs.tag }}.zip \
               --capabilities CAPABILITY_NAMED_IAM
@@ -71,7 +71,7 @@ jobs:
               --template-body file://cloudformation/template.yaml \
               --parameters \
                 ParameterKey=Env,ParameterValue=$ENV \
-                ParameterKey=LambdaCodeBucket,ParameterValue=${{ secrets.LAMBDA_BUCKET }} \
+                ParameterKey=LambdaCodeBucket,ParameterValue=case6-webhook-lambda \
                 ParameterKey=ReceiverCodeKey,ParameterValue=webhook-receiver-${{ steps.version.outputs.tag }}.zip \
                 ParameterKey=ProcessorCodeKey,ParameterValue=webhook-processor-${{ steps.version.outputs.tag }}.zip \
               --capabilities CAPABILITY_NAMED_IAM
