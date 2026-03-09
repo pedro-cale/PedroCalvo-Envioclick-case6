@@ -5,7 +5,7 @@
   },
   {
     "ParameterKey": "LambdaCodeBucket",
-    "ParameterValue": "your-bucket-name"
+    "ParameterValue": "case6-webhook-lambda"
   },
   {
     "ParameterKey": "ReceiverCodeKey",
